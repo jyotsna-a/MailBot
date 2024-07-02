@@ -1,12 +1,7 @@
 chrome.runtime.onInstalled.addListener(() => {
     console.log('Extension installed');
-  
-    // Set the OpenAI API key in chrome.storage
-    chrome.storage.local.set({ openai_api_key: 'your_openai_api_key_here' }, function() {
-      console.log('OpenAI API key stored');
-    });
   });
-  
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'userQuery') {
       handleUserQuery(message.query, sendResponse);
@@ -17,7 +12,8 @@ chrome.runtime.onInstalled.addListener(() => {
   function handleUserQuery(query, sendResponse) {
     chrome.identity.getAuthToken({ interactive: true }, function(token) {
       if (chrome.runtime.lastError) {
-        console.error(chrome.runtime.lastError);
+        console.error('Error getting auth token:', chrome.runtime.lastError.message);
+        sendResponse({ summary: 'Error: ' + chrome.runtime.lastError.message });
         return;
       }
       getChatGPTQuery(query).then(apiQuery => {
@@ -30,6 +26,7 @@ chrome.runtime.onInstalled.addListener(() => {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get('openai_api_key', function(result) {
         if (result.openai_api_key) {
+          console.log('OpenAI API key found'); // Log if API key is found
           fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -37,22 +34,36 @@ chrome.runtime.onInstalled.addListener(() => {
               'Authorization': 'Bearer ' + result.openai_api_key
             },
             body: JSON.stringify({
-              model: 'gpt-4',
+              model: 'gpt-3.5-turbo',
               messages: [
                 {role: 'system', content: 'You are an assistant that helps translate user questions into Gmail search queries.'},
                 {role: 'user', content: userQuery}
               ]
             })
           })
-          .then(response => response.json())
-          .then(data => resolve(data.choices[0].message.content))
-          .catch(error => reject('Error fetching ChatGPT response:', error));
+          .then(response => {
+            console.log('ChatGPT response status:', response.status); // Log response status
+            return response.json();
+          })
+          .then(data => {
+            console.log('ChatGPT response data:', data); // Log response data
+            if (data.error) {
+              console.error('Error in ChatGPT response:', data.error.message); // Log error message
+              reject('Error: ' + data.error.message);
+            } else {
+              resolve(data.choices[0].message.content);
+            }
+          })
+          .catch(error => {
+            console.error('Error fetching ChatGPT response:', error); // Log detailed error
+            reject(error);
+          });
         } else {
           reject('OpenAI API key not found');
         }
       });
     });
-  }
+  }  
   
   function fetchEmails(token, apiQuery, sendResponse) {
     fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(apiQuery)}`, {
